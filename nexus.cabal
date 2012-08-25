@@ -1,0 +1,25 @@
+name: nexus
+version: 0.1
+cabal-version: >=1.2
+build-type: Simple
+license: BSD3
+license-file: LICENSE
+synopsis: The bot nexus
+category: Network
+author: Jeanne-Kamikaze
+data-dir: ""
+ 
+executable nexus
+    build-depends: base -any, network -any, bytestring -any,
+                   MaybeT -any, mtl -any, transformers -any, stm -any, containers -any
+    main-is: Main.hs
+    buildable: True
+    build-tools: hsc2hs -any
+    c-sources: Nexus/Sys/Timer/ctimer.c
+    includes: Nexus/Sys/Timer/Timer.h
+    include-dirs: Nexus/Sys
+    other-modules: Nexus.Actor Nexus.NexusHandler Nexus.ClientHandler
+                   Nexus.Network.Network Nexus.Network.Network Nexus.Network
+                   Nexus.Messages Nexus.Network.Auth Nexus.User Nexus.Nexus
+                   Nexus.Server Nexus.Sys.Timer Nexus.Types
+ 
