@@ -63,10 +63,6 @@ handleClient client@(Client nexus authedClient) = do
     
     -- Handle nexus replies.
     reply <- tryRecv
-    case reply of
-        Nothing -> return ()
-        Just r  -> actorIO . putStrLn $ "ClientHandler> Got reply " ++ show r
-    
     actorIO . runNetwork $ case reply of
         Nothing                       -> return () 
         Just (UserLoggedIn user)      -> sendString sock $ user ++ " connected"
