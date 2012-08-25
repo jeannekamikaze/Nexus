@@ -25,7 +25,7 @@ import Control.Monad.IO.Class
 newtype Actor a = Actor { chan :: TQueue a }
 
 
-newtype ActorM a b = ActorM { runActor :: Actor a -> IO ((Actor a, b)) }
+newtype ActorM a b = ActorM { runActor :: Actor a -> IO (Actor a, b) }
 
 
 instance Monad (ActorM a) where
