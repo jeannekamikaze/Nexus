@@ -44,7 +44,7 @@ handleClient client@(Client nexus authedClient) = do
     
     -- Handle client messages.
     result <- actorIO . runNetwork $ do
-        msg <- tryRecvMessage sock -- Fix tryRecvMessage
+        msg <- tryRecvMessage sock
         return $ handleMsg (authedData authedClient) msg
     
     -- Send requests to nexus if non-empty.
