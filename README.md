@@ -16,6 +16,10 @@ are then forwarded back to the client, so the client and the nexus are effective
 The actual logic driving client handlers and the nexus is pure, allowing one to quickcheck the protocol without
 having to deploy the server on the network.
 
+A custom network API built on top of the network package helps us tell authenticated and unauthenticated clients apart.
+An authentication mechansim kicks clients who do not authenticate themselves within a given time frame and the type
+system ensures that we do not mix authenticated and unauthenticated users around.
+
 Features
 --------
 
