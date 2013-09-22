@@ -1,95 +1,186 @@
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Nexus.Actor
 (
-    Actor
-,   ActorM(..)
-,   newActor
-,   launchActor
-,   send
+    -- * Actor monad class
+    MonadActor(..)
 ,   sendl
 ,   broadcast
-,   recv
-,   tryRecv
-,   self
-,   actorSTM
+    -- * Actor launcher class
+,   ActorLauncher(..)
+    -- * Actor
+,   Actor
+,   newActor
+    -- * Actor monad
+,   ActorM
+,   runActor
+    -- * Actor monad transformer
+,   ActorT
+,   runActorT
+    -- * GHCi helper functions
 ,   actorIO
+,   ioActor
+,   iosend
 )
 where
 
-
-import Control.Concurrent (ThreadId, forkIO)
+import Control.Applicative
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TQueue
+import Control.Monad (void)
 import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 
+--- Actor data type and functions
 
 newtype Actor a = Actor { chan :: TQueue a }
 
+newActor :: IO (Actor a)
+newActor = fmap Actor $ atomically newTQueue
 
-newtype ActorM a b = ActorM { runActor :: Actor a -> IO (Actor a, b) }
+--- MonadActor class
 
-
-instance Monad (ActorM a) where
+class Monad m => MonadActor a m | m -> a where
     
-    return x = ActorM $ \a -> return (a, x)
+    -- | Send a message to the actor.
+    send :: Actor b -> b -> m ()
     
-    --(>>=) :: ActorM a b -> (b -> Actor a c) -> Actor a c
+    -- | Syntatic sugar for 'send'.
+    (!) :: Actor b -> b -> m ()
+    (!) = send
     
-    m >>= f = ActorM $ \a -> do
-        (a', x) <- runActor m a
-        runActor (f x) a'
-
-
-instance MonadIO (ActorM a) where
+    -- | Receive a message. This operation is blocking.
+    recv :: m a
     
-    liftIO x = ActorM $ \a -> (x >>= \b -> return (a,b))
+    -- | Try to receive a message. This operation is non-blocking.
+    tryRecv :: m (Maybe a)
+    
+    -- | Return myself.
+    self :: m (Actor a)
 
+-- | Send a list of messages to an actor.
+sendl :: MonadActor a m => Actor b -> [b] -> m ()
+sendl actor = mapM_ (send actor)
+
+-- | Broadcast a message to several actors.
+broadcast :: MonadActor a m => [Actor b] -> b -> m ()
+broadcast actors msg = mapM_ (flip send msg) actors
+
+--- ActorLauncher class
+
+class ActorLauncher a m | m -> a where
+    
+    -- | Launch the actor in a separate thread.
+    launch :: m b -> IO (Actor a)
+
+--- Actor monad
+--- Pure actor API
+
+-- This doesn't work. Gotta call 'atomically' to run the underlying STM actions.
+--newtype ActorM a b = ActorM { runActor :: Actor a -> STM b }
+
+newtype ActorM a b = ActorM { runActor :: Actor a -> IO b }
 
 instance Functor (ActorM a) where
+
+    fmap f m = ActorM $ \a -> fmap f (runActor m a)
+
+instance Applicative (ActorM a) where
+
+    pure f = ActorM $ \_ -> pure f
     
-    fmap f m = ActorM $ \a -> runActor m a >>= \(a',b) -> return (a', f b)
+    af <*> m = ActorM $ \a ->
+         let mf = runActor af a
+             mb = runActor m a
+         in mf <*> mb
 
+instance Monad (ActorM a) where
 
+    return x = ActorM $ \_ -> return x
 
+    --(>>=) :: ActorM a b -> (b -> ActorM a c) -> ActorM a c
 
-newActor :: IO (Actor a)
-newActor = atomically newTQueue >>= return . Actor
+    m >>= f = ActorM $ \a -> do
+        b <- runActor m a
+        runActor (f b) a
 
+instance MonadActor a (ActorM a) where
+    
+    send actor msg = ActorM $ \_ -> atomically $ writeTQueue (chan actor) msg
+    
+    recv = ActorM $ atomically . readTQueue . chan
+    
+    tryRecv = ActorM $ atomically . tryReadTQueue . chan
+    
+    self = ActorM return
+    
+instance ActorLauncher a (ActorM a) where
+    
+    launch m = newActor >>= \a -> (forkIO . void $ runActor m a) >> return a
 
-launchActor :: ActorM a b -> Actor a -> IO ThreadId
-launchActor m actor = forkIO $ runActor m actor >> return ()
+--- Actor monad transformer
 
+newtype ActorT a m b = ActorT { runActorT :: Actor a -> m b }
 
-send :: a -> Actor a -> ActorM b ()
-send msg actor = actorSTM $ writeTQueue (chan actor) msg
+instance Functor f => Functor (ActorT a f) where
 
+    fmap f m = ActorT $ \a -> fmap f $ runActorT m a
 
-sendl :: [a] -> Actor a -> ActorM b ()
-sendl msgs actor = mapM_ (flip send actor) msgs
+instance Applicative f => Applicative (ActorT a f) where
 
+    pure f = ActorT $ \_ -> pure f
+    
+    f <*> m = ActorT $ \a ->
+        let mf = runActorT f a
+            mb = runActorT m a
+        in mf <*> mb
 
-broadcast :: a -> [Actor a] -> ActorM b ()
-broadcast msg = mapM_ (send msg)
+instance Monad m => Monad (ActorT a m) where
 
+    return x = ActorT $ \_ -> return x
+    
+    --(>>=) :: ActorT a b -> (b -> ActorT a c) -> ActorT a c
+    
+    m >>= f = ActorT $ \a -> do
+        b <- runActorT m a
+        runActorT (f b) a
 
-recv :: ActorM a a
-recv = ActorM $ \a -> do
-    val <- atomically . readTQueue . chan $ a
-    return (a, val)
+instance MonadIO m => MonadIO (ActorT a m) where
 
+    liftIO x = ActorT $ \_ -> liftIO x >>= \b -> return b
 
-tryRecv :: ActorM a (Maybe a)
-tryRecv = ActorM $ \a -> do
-    val <- atomically . tryReadTQueue . chan $ a
-    return (a, val)
+instance MonadIO m => MonadActor a (ActorT a m) where
+    
+    send actor msg = ActorT $ \_ -> do
+        liftIO . atomically $ writeTQueue (chan actor) msg
+        return ()
+    
+    recv = ActorT $ liftIO . atomically . readTQueue . chan
+    
+    tryRecv = ActorT $ liftIO . atomically . tryReadTQueue . chan
+    
+    self = ActorT return
 
+instance MonadTrans (ActorT a) where
+    
+    lift = ActorT . const
 
-self :: ActorM a (Actor a)
-self = ActorM $ \a -> return (a,a)
+instance ActorLauncher a (ActorT a IO) where
+    
+    launch m = newActor >>= \a -> (forkIO . void $ runActorT m a) >> return a
 
-
-actorSTM :: STM a -> ActorM b a
-actorSTM = liftIO . atomically
-
-
-actorIO :: IO a -> ActorM b a
+-- | Lift an 'IO' action into the ActorT monad.
+--
+-- This is equivalent to 'liftIO'.
+actorIO :: MonadIO m => IO a -> ActorT b m a
 actorIO = liftIO
+    
+--- Functions so that we can play with actors in ghci
+
+-- | An actor that shows all received messages in the standard output channel.
+ioActor :: Show a => ActorT a IO ()
+ioActor = recv >>= \msg -> actorIO (threadDelay (100*10^3) >> (putStrLn . show) msg) >> ioActor
+
+-- | Send a message from the first actor to the second.
+iosend :: Show a => Actor a -> b -> Actor (Actor a, b) -> IO ()
+iosend from msg to = flip runActor from $ send to (from, msg)
