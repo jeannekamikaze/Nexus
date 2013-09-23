@@ -12,7 +12,7 @@ serverPort = 1717
 
 main = monitor runNexus main'
 
-main' nexus getResult = serve serverPort (server nexus getResult) >> putStrLn "main' done"
+main' nexus getResult = serve serverPort (server nexus getResult)
 
 server nexus getResult sock = do
     forkIO $ acceptConnection nexus sock

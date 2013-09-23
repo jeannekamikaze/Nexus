@@ -156,7 +156,7 @@ instance ActorLauncher a (ActorT a IO) where
     monitor m run = newActor >>= \a -> do
         result <- newEmptyMVar
         let getResult = tryTakeMVar result
-        forkIO $ runActorT m a >>= putMVar result >> putStrLn "actor finished"
+        forkIO $ runActorT m a >>= putMVar result
         run a getResult
 
 -- | Lift an 'IO' action into the ActorT monad.

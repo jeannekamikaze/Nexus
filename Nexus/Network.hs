@@ -79,9 +79,7 @@ netYield = NetworkT . const . right
 
 -- | Send a string.
 sendString :: MonadIO m => String -> NetworkT m Int
-sendString str = NetworkT $ \sock -> eitherIO $ do
-    putStrLn $ "Sending string: " ++ str
-    NB.send sock $ B.pack str `B.append` B.pack"\r\n"
+sendString str = NetworkT $ \sock -> eitherIO $ NB.send sock $ B.pack str `B.append` B.pack"\r\n"
 
 -- | Send a bytestring.
 sendBString :: MonadIO m => B.ByteString -> NetworkT m Int
@@ -145,7 +143,6 @@ serve port serve = N.withSocketsDo $ do
     N.bindSocket sock (N.addrAddress serveraddr)
     N.listen sock 1
     serve sock
-    putStrLn "serve: server shutting down"
 
 -- | Accept a connection from a client.
 accept :: N.Socket -> IO Client
