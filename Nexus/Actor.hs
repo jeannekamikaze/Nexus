@@ -1,5 +1,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Nexus.Actor
 (
     -- * Actor monad class
@@ -28,7 +29,6 @@ import Control.Applicative
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
-import Data.Maybe (isJust)
 import Control.Monad (void)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -83,24 +83,7 @@ class ActorLauncher a m | m -> a where
 
 -- Newtype this to avoid the IO from leaking out.
 newtype ActorM a b = ActorM { runActor' :: ActorT a IO b }
-
-instance Functor (ActorM a) where
-
-    fmap f (ActorM m) = ActorM $ fmap f m
-
-instance Applicative (ActorM a) where
-
-    pure f = ActorM $ pure f
-    
-    (ActorM af) <*> (ActorM m) = ActorM $ af <*> m
-
-instance Monad (ActorM a) where
-
-    return x = ActorM $ return x
-
-    --(>>=) :: ActorM a b -> (b -> ActorM a c) -> ActorM a c
-    
-    (ActorM m) >>= f = ActorM $ m >>= \a -> runActor' $ f a
+    deriving (Functor, Applicative, Monad)
 
 instance MonadActor a (ActorM a) where
     
