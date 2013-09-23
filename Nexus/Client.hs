@@ -38,20 +38,20 @@ handle user ShutdownServer = Nothing
 
 --- Actor API
 
-data State = State NexusActor (Maybe User) Client
+data State = State NexusActor (Maybe User)
 
 runClient :: NexusActor -> Client -> ActorT NexusReply IO ()
 runClient n c = do
     actor <- lift newActor
-    lift . forkIO . void $ runNetwork c $ runActorT (listenClient (State n Nothing c)) actor
-    lift . forkIO . void $ runNetwork c $ runActorT (listenNexus (State n Nothing c)) actor
+    lift . forkIO . void $ runNetwork c $ runActorT (listenClient (State n Nothing)) actor
+    lift . forkIO . void $ runNetwork c $ runActorT (listenNexus (State n Nothing)) actor
     return () 
 
 listenClient :: State -> ActorT NexusReply Network () 
-listenClient state@(State nexus user client) = do
+listenClient state@(State nexus user) = do
     me <- self
     
-    message <- lift . runNetwork' $ recvMessage client
+    message <- lift . runNetwork' $ recvMessage
     
     trace ("User message: " ++ show message) $ return ()
     
@@ -81,25 +81,26 @@ listenClient state@(State nexus user client) = do
         then lift closeSocket >> case user of
             Just u  -> nexus !(me, Logoff $ name u)
             Nothing -> return ()
-        else actorIO (threadSleep 0.200) >> listenClient (State nexus user' client)
-    
+        else actorIO (threadSleep 0.200) >> listenClient (State nexus user')
+
 -- Handle nexus replies.
 listenNexus :: State -> ActorT NexusReply Network () 
-listenNexus state@(State nexus user client) = do
+listenNexus state@(State nexus user) = do
     reply <- recv
     trace ("Nexus reply: " ++ show reply) $ return ()
     lift $ case reply of
-        Ok                       -> sendString client "Ok"
-        UserAlreadyExists        -> sendString client "Nickname is already in use"
-        (UserLoggedIn user)      -> sendString client $ user ++ " connected"
-        (UserLoggedOff user)     -> sendString client $ user ++ " disconnected"
-        (UserList users)         -> sendString client $ unwords users
-        (MessageSent sender msg) -> sendString client $ sender ++ "> " ++ msg
-        ServerShutDown           -> sendString client "Server shutting down"
+        Ok                       -> sendString "Ok"
+        UserAlreadyExists        -> sendString "Nickname is already in use"
+        (UserLoggedIn user)      -> sendString $ user ++ " connected"
+        (UserLoggedOff user)     -> sendString $ user ++ " disconnected"
+        (UserList users)         -> sendString $ unwords users
+        (MessageSent sender msg) -> sendString $ sender ++ "> " ++ msg
+        ServerShutDown           -> sendString "Server shutting down"
+                                 >> closeSocket >> return 0
     listenNexus state
 
-recvMessage :: Socket -> Network NetworkMessage
-recvMessage sock = recvBString sock 256 >>= parse . fmap B.unpack . B.words
+recvMessage :: Network NetworkMessage
+recvMessage = recvBString 256 >>= parse . fmap B.unpack . B.words
 
 parse :: [String] -> Network NetworkMessage
 parse [] = netYield Nothing

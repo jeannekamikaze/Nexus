@@ -26,7 +26,9 @@ where
 
 import Control.Applicative
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar
 import Control.Concurrent.STM
+import Data.Maybe (isJust)
 import Control.Monad (void)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -72,51 +74,52 @@ class ActorLauncher a m | m -> a where
     
     -- | Launch the actor in a separate thread.
     launch :: m b -> IO (Actor a)
+    
+    -- | Monitor an actor.
+    monitor :: m b -> (Actor a -> IO (Maybe b) -> IO c) -> IO c
 
 --- Actor monad
 --- Pure actor API
 
--- This doesn't work. Gotta call 'atomically' to run the underlying STM actions.
---newtype ActorM a b = ActorM { runActor :: Actor a -> STM b }
-
-newtype ActorM a b = ActorM { runActor :: Actor a -> IO b }
+-- Newtype this to avoid the IO from leaking out.
+newtype ActorM a b = ActorM { runActor' :: ActorT a IO b }
 
 instance Functor (ActorM a) where
 
-    fmap f m = ActorM $ \a -> fmap f (runActor m a)
+    fmap f (ActorM m) = ActorM $ fmap f m
 
 instance Applicative (ActorM a) where
 
-    pure f = ActorM $ \_ -> pure f
+    pure f = ActorM $ pure f
     
-    af <*> m = ActorM $ \a ->
-         let mf = runActor af a
-             mb = runActor m a
-         in mf <*> mb
+    (ActorM af) <*> (ActorM m) = ActorM $ af <*> m
 
 instance Monad (ActorM a) where
 
-    return x = ActorM $ \_ -> return x
+    return x = ActorM $ return x
 
     --(>>=) :: ActorM a b -> (b -> ActorM a c) -> ActorM a c
-
-    m >>= f = ActorM $ \a -> do
-        b <- runActor m a
-        runActor (f b) a
+    
+    (ActorM m) >>= f = ActorM $ m >>= \a -> runActor' $ f a
 
 instance MonadActor a (ActorM a) where
     
-    send actor msg = ActorM $ \_ -> atomically $ writeTQueue (chan actor) msg
+    send actor msg = ActorM $ send actor msg
     
-    recv = ActorM $ atomically . readTQueue . chan
+    recv = ActorM recv
     
-    tryRecv = ActorM $ atomically . tryReadTQueue . chan
+    tryRecv = ActorM tryRecv
     
-    self = ActorM return
+    self = ActorM self
     
 instance ActorLauncher a (ActorM a) where
     
-    launch m = newActor >>= \a -> (forkIO . void $ runActor m a) >> return a
+    launch (ActorM m) = launch m
+    
+    monitor (ActorM m) run = monitor m run
+
+runActor :: ActorM a b -> (Actor a -> IO b)
+runActor (ActorM m) = runActorT m
 
 --- Actor monad transformer
 
@@ -138,8 +141,6 @@ instance Applicative f => Applicative (ActorT a f) where
 instance Monad m => Monad (ActorT a m) where
 
     return x = ActorT $ \_ -> return x
-    
-    --(>>=) :: ActorT a b -> (b -> ActorT a c) -> ActorT a c
     
     m >>= f = ActorT $ \a -> do
         b <- runActorT m a
@@ -168,13 +169,19 @@ instance MonadTrans (ActorT a) where
 instance ActorLauncher a (ActorT a IO) where
     
     launch m = newActor >>= \a -> (forkIO . void $ runActorT m a) >> return a
+    
+    monitor m run = newActor >>= \a -> do
+        result <- newEmptyMVar
+        let getResult = tryTakeMVar result
+        forkIO $ runActorT m a >>= putMVar result >> putStrLn "actor finished"
+        run a getResult
 
 -- | Lift an 'IO' action into the ActorT monad.
 --
 -- This is equivalent to 'liftIO'.
 actorIO :: MonadIO m => IO a -> ActorT b m a
 actorIO = liftIO
-    
+
 --- Functions so that we can play with actors in ghci
 
 -- | An actor that shows all received messages in the standard output channel.

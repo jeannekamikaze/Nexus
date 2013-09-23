@@ -8,7 +8,6 @@ where
 import Nexus.Actor
 import Nexus.Types
 
-import Control.Concurrent (threadDelay)
 import qualified Data.Map as M
 
 import qualified Data.List as L (delete, notElem)
@@ -66,6 +65,6 @@ runNexus' state@(State nexus actorFromUser) = recv >>= \(sender, req) ->
         
         MessageSent _ _ -> broadcast clientActors rep >> runNexus' state'
         
-        ServerShutDown  -> broadcast clientActors rep >> runNexus' state'
+        ServerShutDown  -> broadcast clientActors rep >> return ()
         
         _ -> sender ! rep >> runNexus' state'
