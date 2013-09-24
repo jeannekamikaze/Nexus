@@ -29,7 +29,7 @@ import Control.Applicative
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 
@@ -79,10 +79,9 @@ class ActorLauncher a m | m -> a where
     monitor :: m b -> (Actor a -> IO (Maybe b) -> IO c) -> IO c
 
 --- Actor monad
---- Pure actor API
 
--- Newtype this to avoid the IO from leaking out.
-newtype ActorM a b = ActorM { runActor' :: ActorT a IO b }
+-- Newtype this to avoid the IO from leaking out into the wild.
+newtype ActorM a b = ActorM (ActorT a IO b)
     deriving (Functor, Applicative, Monad)
 
 instance MonadActor a (ActorM a) where
@@ -101,7 +100,7 @@ instance ActorLauncher a (ActorM a) where
     
     monitor (ActorM m) run = monitor m run
 
-runActor :: ActorM a b -> (Actor a -> IO b)
+runActor :: ActorM a b -> Actor a -> IO b
 runActor (ActorM m) = runActorT m
 
 --- Actor monad transformer
@@ -168,9 +167,14 @@ actorIO = liftIO
 --- Functions so that we can play with actors in ghci
 
 -- | An actor that shows all received messages in the standard output channel.
+--
+-- Send it the message "kill" to kill it.
 ioActor :: Show a => ActorT a IO ()
-ioActor = recv >>= \msg -> actorIO (threadDelay (100*10^3) >> (putStrLn . show) msg) >> ioActor
+ioActor = do
+    msg <- recv
+    actorIO $ threadDelay (100*1000) >> print msg
+    when (show msg /= "kill") ioActor
 
 -- | Send a message from the first actor to the second.
-iosend :: Show a => Actor a -> b -> Actor (Actor a, b) -> IO ()
-iosend from msg to = flip runActor from $ send to (from, msg)
+iosend :: Actor a -> b -> Actor b -> IO ()
+iosend from msg to = flip runActor from $ to ! msg

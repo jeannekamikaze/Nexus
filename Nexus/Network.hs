@@ -120,10 +120,6 @@ closeSocket = NetworkT $ \s -> fmap Just . liftIO $ N.close s
 safeRecv :: Socket -> Int -> IO (B.ByteString)
 safeRecv sock nbytes = catch (NB.recv sock nbytes) (\(e :: IOException) -> return $ B.pack "")
 
--- Throw an error inside the network monad.
-netFail :: Monad m => Disconnected -> NetworkT m a
-netFail = NetworkT . const . left
-
 --- Server
 
 type Client = Socket
@@ -132,7 +128,7 @@ type Server = Socket -> IO ()
 
 -- | Start a server on the given port.
 serve :: Port -> Server -> IO ()
-serve port serve = N.withSocketsDo $ do
+serve port server = N.withSocketsDo $ do
     addr <- N.inet_addr "127.0.0.1"
     addrinfos <- N.getAddrInfo
                      (Just $ N.AddrInfo [N.AI_PASSIVE] N.AF_INET N.Stream N.defaultProtocol (N.SockAddrInet port addr) Nothing)
@@ -142,10 +138,8 @@ serve port serve = N.withSocketsDo $ do
     sock <- N.socket (N.addrFamily serveraddr) N.Stream N.defaultProtocol
     N.bindSocket sock (N.addrAddress serveraddr)
     N.listen sock 1
-    serve sock
+    server sock
 
 -- | Accept a connection from a client.
 accept :: N.Socket -> IO Client
-accept sock = do
-    (sock, _) <- N.accept sock
-    return sock
+accept sock = fmap fst $ N.accept sock
