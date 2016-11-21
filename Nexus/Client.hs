@@ -6,7 +6,7 @@ module Nexus.Client
 where
 
 import Nexus.Actor
-import Nexus.Network (Network, Socket, Client(..), netYield, sendString, recvBString
+import Nexus.Network (Network, Client, netYield, sendString, recvBString
                      ,runNetwork, runNetwork', closeSocket)
 import Nexus.Types
 
@@ -32,9 +32,10 @@ data User
 handle :: User -> NetworkMessage -> Maybe ClientRequest
 handle user Disconnect = Just $ Logoff (name user)
 handle user (SendMessage msg) = Just $ Send (name user) msg
-handle user GetUserList = Just $ RetrieveUserList
-handle user@Admin{} ShutdownServer = Just Shutdown
-handle user ShutdownServer = Nothing
+handle _ GetUserList = Just $ RetrieveUserList
+handle Admin{} ShutdownServer = Just Shutdown
+handle _ ShutdownServer = Nothing
+handle _ _ = Nothing
 
 --- Actor API
 
@@ -43,18 +44,18 @@ data State = State NexusActor (Maybe User)
 runClient :: NexusActor -> Client -> ActorT NexusReply IO ()
 runClient n c = do
     actor <- lift newActor
-    lift . forkIO . void $ runNetwork c $ runActorT (listenClient (State n Nothing)) actor
-    lift . forkIO . void $ runNetwork c $ runActorT (listenNexus (State n Nothing)) actor
-    return () 
+    _ <- lift . forkIO . void $ runNetwork c $ runActorT (listenClient (State n Nothing)) actor
+    _ <- lift . forkIO . void $ runNetwork c $ runActorT (listenNexus (State n Nothing)) actor
+    return ()
 
-listenClient :: State -> ActorT NexusReply Network () 
-listenClient state@(State nexus user) = do
+listenClient :: State -> ActorT NexusReply Network ()
+listenClient (State nexus user) = do
     me <- self
-    
+
     message <- lift . runNetwork' $ recvMessage
-    
+
     trace ("User message: " ++ show message) $ return ()
-    
+
     -- Send request to nexus if non-empty.
     -- Return 'True' if the client issued a disconnect message.
     (user', disconnected) <- case message of
@@ -72,10 +73,10 @@ listenClient state@(State nexus user) = do
                     Just u -> case handle u msg of
                         Nothing -> return (user, False)
                         Just req -> do
-                            me <- self
-                            nexus ! (me,req)
+                            me' <- self
+                            nexus ! (me',req)
                             return (user, msg == Disconnect)
-    
+
     -- Quit if the user sent a disconnect message.
     if disconnected
         then lift closeSocket >> case user of
@@ -84,11 +85,11 @@ listenClient state@(State nexus user) = do
         else actorIO (threadSleep 0.200) >> listenClient (State nexus user')
 
 -- Handle nexus replies.
-listenNexus :: State -> ActorT NexusReply Network () 
-listenNexus state@(State nexus user) = do
+listenNexus :: State -> ActorT NexusReply Network ()
+listenNexus state = do
     reply <- recv
     trace ("Nexus reply: " ++ show reply) $ return ()
-    lift $ case reply of
+    _ <- lift $ case reply of
         Ok                       -> sendString "Ok"
         UserAlreadyExists        -> sendString "Nickname is already in use"
         (UserLoggedIn user)      -> sendString $ user ++ " connected"
@@ -112,4 +113,4 @@ parse ["shutdown"] = netYield $ Just ShutdownServer
 parse _ = netYield Nothing
 
 threadSleep :: Float -> IO ()
-threadSleep = threadDelay . floor . (*10^6)
+threadSleep = threadDelay . floor . (*1e6)

@@ -5,7 +5,7 @@ import Nexus.Client
 import Nexus.Network
 import Nexus.Nexus
 
-import Control.Concurrent (forkIO, killThread, threadDelay)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever)
 
 serverPort = 1717
@@ -15,7 +15,7 @@ main = monitor runNexus main'
 main' nexus getResult = serve serverPort (server nexus getResult)
 
 server nexus getResult sock = do
-    forkIO $ acceptConnection nexus sock
+    _ <- forkIO $ acceptConnection nexus sock
     server' nexus getResult
 
 server' nexus getResult = do
