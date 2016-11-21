@@ -24,6 +24,7 @@ module Nexus.Network
 )
 where
 
+import Control.Applicative (liftA2)
 import Control.Exception (IOException , catch)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class (lift)
@@ -44,10 +45,16 @@ instance Monad m => Functor (NetworkT m) where
 
     fmap f (NetworkT n) = NetworkT $ \s -> (fmap . fmap) f $ n s
 
+instance Monad m => Applicative (NetworkT m) where
+
+    pure = return
+
+    (NetworkT f) <*> (NetworkT n) = NetworkT $ \s -> (liftA2 (<*>)) (f s) (n s)
+
 instance Monad m => Monad (NetworkT m) where
 
     return x = NetworkT . const . return . Just $ x
-    
+
     (NetworkT n) >>= f = NetworkT $ \s -> do
         a <- n s
         case a of
@@ -55,7 +62,7 @@ instance Monad m => Monad (NetworkT m) where
             Just x  -> run (f x) s
 
 instance MonadIO m => MonadIO (NetworkT m) where
-    
+
     liftIO x = NetworkT . const . fmap Just . liftIO $ x
 
 eitherIO :: MonadIO m => IO a -> EitherT Disconnected m (Maybe a)
@@ -96,7 +103,7 @@ recvBString nbytes = NetworkT $ \sock -> do
     if B.null str then left Disconnected else right . Just $ str
 
 -- | Receive a bytestring.
--- 
+--
 -- This operation is non-blocking.
 tryRecvBString :: MonadIO m => Int -> NetworkT m B.ByteString
 tryRecvBString nbytes = NetworkT $ \sock -> do
@@ -118,7 +125,7 @@ closeSocket :: MonadIO m => NetworkT m ()
 closeSocket = NetworkT $ \s -> fmap Just . liftIO $ N.close s
 
 safeRecv :: Socket -> Int -> IO (B.ByteString)
-safeRecv sock nbytes = catch (NB.recv sock nbytes) (\(e :: IOException) -> return $ B.pack "")
+safeRecv sock nbytes = catch (NB.recv sock nbytes) (\(_ :: IOException) -> return $ B.pack "")
 
 --- Server
 
@@ -136,7 +143,7 @@ serve port server = N.withSocketsDo $ do
                      (Just . show $ port)
     let serveraddr = head addrinfos
     sock <- N.socket (N.addrFamily serveraddr) N.Stream N.defaultProtocol
-    N.bindSocket sock (N.addrAddress serveraddr)
+    N.bind sock (N.addrAddress serveraddr)
     N.listen sock 1
     server sock
 
